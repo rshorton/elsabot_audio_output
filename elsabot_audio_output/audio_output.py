@@ -1,37 +1,66 @@
 import pyaudio
 import numpy as np
 import queue
+import threading
 import time
 
 class AudioQueue:
     def __init__(self):
         self.queue = queue.Queue()
         self.cur_item = None
+        self.cur_req_id = None
         self.cur_item_offset = 0
 
-    def put(self, data):
-        self.queue.put(data)
+        self.cancel_list = []
+        self.cancel_list_lock = threading.Lock()
+
+    def put(self, data, req_id):
+        self.queue.put((data, req_id))
 
     def get(self, req_size):
         out_size = 0
         data = None
         try:
-            if self.cur_item == None:
-                self.cur_item = self.queue.get_nowait()
-                self.cur_item_offset = 0;
+            while(True):
+                if self.cur_item == None:
+                    self.cur_item, self.cur_req_id = self.queue.get_nowait()
+                    self.cur_item_offset = 0
 
-            avail = len(self.cur_item) - self.cur_item_offset
-            out_size = avail if avail < req_size else req_size
+                if self.should_drop(self.cur_req_id):
+                    # Probably should decay last sample to zero here to avoid a pop
+                    self.cur_item = None
+                    continue
 
-            data = self.cur_item[self.cur_item_offset : self.cur_item_offset + out_size]
+                avail = len(self.cur_item) - self.cur_item_offset
+                out_size = avail if avail < req_size else req_size
 
-            self.cur_item_offset += out_size
-            if len(self.cur_item) - self.cur_item_offset <= 0:
-              self.cur_item = None
+                data = self.cur_item[self.cur_item_offset : self.cur_item_offset + out_size]
+
+                self.cur_item_offset += out_size
+                if len(self.cur_item) - self.cur_item_offset <= 0:
+                    self.cur_item = None
+                break
 
         except queue.Empty:
             pass
         return out_size, data
+
+    def should_drop(self, req_id):
+        drop = False
+        new_list = []
+        with self.cancel_list_lock:
+            for id, remaining_cks in self.cancel_list:
+                if req_id == id:
+                    drop = True
+                    print(f"drop {req_id}  remaining {remaining_cks}")
+                if remaining_cks > 1:
+                    new_list.append((id, remaining_cks - 1))
+            self.cancel_list = new_list                    
+        return drop            
+
+    def cancel(self, req_id):
+        with self.cancel_list_lock:
+            self.cancel_list.append((req_id, self.queue.qsize()))
 
 class AudioOutput:
     def __init__(self, device_name=None, rate=44100):
@@ -44,6 +73,7 @@ class AudioOutput:
         self.queue_fg = AudioQueue()
         self.queue_bg = AudioQueue()
         
+        self.paused = False
         self.p = pyaudio.PyAudio()
         self.stream = None
 
@@ -72,8 +102,13 @@ class AudioOutput:
         bytes_needed = frame_count * self.channels * 4
         
         # Pull data from both queues
-        raw_a = self._get_chunk_from_queue(self.queue_fg, bytes_needed)
-        raw_b = self._get_chunk_from_queue(self.queue_bg, bytes_needed)
+        if self.paused:
+            data = bytearray(bytes_needed)
+            arr = np.frombuffer(data, dtype=np.float32)
+            return (arr.tobytes(), pyaudio.paContinue)
+        else:
+            raw_a = self._get_chunk_from_queue(self.queue_fg, bytes_needed)
+            raw_b = self._get_chunk_from_queue(self.queue_bg, bytes_needed)
 
         # Convert raw bytes back to numpy arrays for mixing
         arr_a = np.frombuffer(raw_a, dtype=np.float32)
@@ -85,7 +120,7 @@ class AudioOutput:
 
         return (mixed.tobytes(), pyaudio.paContinue)
 
-    def add_to_queue(self, q_name, audio_data, source_rate, source_channels=1):
+    def add_to_queue(self, q_name, audio_data, source_rate, req_id, source_channels=1):
         target_q = self.queue_fg if q_name.lower() == 'fg' else self.queue_bg
         
         processed = np.array(audio_data, dtype=np.float32)
@@ -108,7 +143,11 @@ class AudioOutput:
             print("Reshape channels")
             processed = processed.reshape(-1, 2)
 
-        target_q.put(processed.tobytes())
+        target_q.put(processed.tobytes(), req_id)
+
+    def cancel(self, req_id):
+        self.queue_fg.cancel(req_id)
+        self.queue_bg.cancel(req_id)
 
     def start(self):
 
@@ -138,3 +177,8 @@ class AudioOutput:
             self.stream.close()
         self.p.terminate()
 
+    def pause(self):
+        self.paused = True
+
+    def resume(self):
+        self.paused = False

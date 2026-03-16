@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from elsabot_audio_output_interfaces.srv import PlayTTS, PlayAudioFile
+from elsabot_audio_output_interfaces.srv import PlayTTS, PlayAudioFile, CancelAudio, PauseAudio, ResumeAudio
 from elsabot_audio_output_interfaces.msg import StreamType
 
 from .audio_output import AudioOutput
@@ -14,8 +14,11 @@ class AudioOutputServerNode(Node):
     def __init__(self):
         super().__init__('audio_output_server_node')
 
-        self.tts_srv = self.create_service(PlayTTS, 'tts_service', self.tts_service_callback)
-        self.audio_srv = self.create_service(PlayAudioFile, 'audio_service', self.audio_service_callback)
+        self.tts_srv = self.create_service(PlayTTS, 'play_tts_service', self.tts_service_callback)
+        self.audio_srv = self.create_service(PlayAudioFile, 'play_audio_service', self.audio_service_callback)
+        self.cancel_srv = self.create_service(CancelAudio, 'cancel_audio_service', self.cancel_service_callback)
+        self.pause_srv = self.create_service(PauseAudio, 'pause_audio_service', self.pause_service_callback)
+        self.resume_srv = self.create_service(ResumeAudio, 'resume_audio_service', self.resume_service_callback)
 
         self.audio_output = AudioOutput()
         self.audio_output.start()
@@ -24,6 +27,24 @@ class AudioOutputServerNode(Node):
 
     def __del__(self):
         self.audio_output.stop()
+
+    def pause_service_callback(self, request, response):
+        self.audio_output.pause()
+        response.result = "success"
+        return response
+
+    def resume_service_callback(self, request, response):
+        self.audio_output.resume()
+        response.result = "success"
+        return response
+
+    def cancel_service_callback(self, request, response):
+        self.tts.cancel(request.req_id);
+        self.audio_output.cancel(request.req_id);
+
+        response.result = "success"
+        self.get_logger().info(f'Cancel request: req_id={request.req_id}. Returning: {response.result}')
+        return response
 
     def tts_service_callback(self, request, response):
         response.result = self.tts.convert(request.tts_req.text, request.req_id)
@@ -41,8 +62,8 @@ class AudioOutputServerNode(Node):
         except Exception as ex:
             response.result = "file not found: " + request.audio_req.file_path + ", " + ex
 
-        self.audio_output.add_to_queue(stream_type, data, source_rate=samplerate)
-        response.result = "ok"
+        self.audio_output.add_to_queue(stream_type, data, samplerate, request.req_id)
+        response.result = "success"
 
         return response
 
