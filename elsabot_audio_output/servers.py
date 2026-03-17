@@ -25,6 +25,7 @@ class AudioOutputServerNode(Node):
         self.publisher_head_speaking = self.create_publisher(Bool, '/head/speaking', 10)
         self.publisher_fg_status = self.create_publisher(String, '/audio_output/status/fg', 10)
         self.publisher_bg_status = self.create_publisher(String, '/audio_output/status/bg', 10)
+        self.publisher_tts_status = self.create_publisher(String, '/audio_output/status/tts', 10)
 
         self.audio_output = AudioOutput()
         self.audio_output.start()
@@ -40,7 +41,7 @@ class AudioOutputServerNode(Node):
         self.timer = Timer(0.5, self.report_status)
         self.timer.start()
 
-    def publish_status(self, status, pub):
+    def publish_channel_status(self, status, pub):
         msg = String()
         if status == AudioType.TTS:
             msg.data = 'tts'
@@ -50,11 +51,23 @@ class AudioOutputServerNode(Node):
             msg.data = 'none'                
         pub.publish(msg)
 
+    def publish_tts_status(self, status):
+        msg = String()
+        if status["fg"] == AudioType.TTS or \
+           status["bg"] == AudioType.TTS or \
+           self.tts.is_processing():
+            msg.data = "active"
+        else:
+            msg.data = "inactive"
+        self.publisher_tts_status.publish(msg)
+
     def report_status(self):
         status = self.audio_output.get_audio_type()
 
-        self.publish_status(status["fg"], self.publisher_fg_status)
-        self.publish_status(status["bg"], self.publisher_bg_status)
+        self.publish_channel_status(status["fg"], self.publisher_fg_status)
+        self.publish_channel_status(status["bg"], self.publisher_bg_status)
+
+        self.publish_tts_status(status)
 
         # Legacy support for Head node
         msg = Bool()

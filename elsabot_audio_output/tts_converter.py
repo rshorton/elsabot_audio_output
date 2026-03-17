@@ -16,6 +16,8 @@ class TTSConverter():
       self.cancel_list = []
       self.cancel_list_lock = threading.Lock()
 
+      self.processing = False
+
       self.run = True
 
       self.worker_thread = threading.Thread(target=self._worker, daemon=True)
@@ -33,6 +35,9 @@ class TTSConverter():
       with self.cancel_list_lock:
           self.cancel_list.append((req_id, self.queue.qsize()))
 
+  def is_processing(self):
+      return self.queue.qsize() > 0 or self.processing
+
   def should_drop(self, req_id):
       drop = False
       new_list = []
@@ -48,8 +53,12 @@ class TTSConverter():
 
   def _worker(self):
       while self.run:
+          self.processing = False
+
           # Blocks until an item is available in the queue
           text, req_id = self.queue.get()
+          self.processing = True
+
           if self.should_drop(req_id):
               self.logger.info(f'TTS conversion dropped, req_id={req_id}')
               continue
@@ -64,4 +73,3 @@ class TTSConverter():
                   continue
 
               self.audio_output.add_to_queue('fg', audio, sample_rate, AudioType.TTS, req_id)
-
