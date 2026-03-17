@@ -2,6 +2,7 @@ import threading
 import queue
 import requests
 
+from .audio_output import AudioType
 from .tts_provider_factory import create_tts_provider
 
 class TTSConverter():
@@ -62,5 +63,5 @@ class TTSConverter():
                   self.logger.info(f'TTS conversion canceled, req_id={req_id}')
                   continue
 
-              self.audio_output.add_to_queue('fg', audio, sample_rate, req_id)
+              self.audio_output.add_to_queue('fg', audio, sample_rate, AudioType.TTS, req_id)
 

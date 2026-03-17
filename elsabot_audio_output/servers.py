@@ -2,13 +2,15 @@ import rclpy
 from rclpy.node import Node
 from elsabot_audio_output_interfaces.srv import PlayTTS, PlayAudioFile, CancelAudio, PauseAudio, ResumeAudio
 from elsabot_audio_output_interfaces.msg import StreamType
+from std_msgs.msg import Bool, String
 
-from .audio_output import AudioOutput
+from .audio_output import AudioOutput, AudioType
 from .tts_converter import TTSConverter
 
 import os
 import numpy as np
 import soundfile as sf
+from threading import Timer
 
 class AudioOutputServerNode(Node):
     def __init__(self):
@@ -20,13 +22,46 @@ class AudioOutputServerNode(Node):
         self.pause_srv = self.create_service(PauseAudio, 'pause_audio_service', self.pause_service_callback)
         self.resume_srv = self.create_service(ResumeAudio, 'resume_audio_service', self.resume_service_callback)
 
+        self.publisher_head_speaking = self.create_publisher(Bool, '/head/speaking', 10)
+        self.publisher_fg_status = self.create_publisher(String, '/audio_output/status/fg', 10)
+        self.publisher_bg_status = self.create_publisher(String, '/audio_output/status/bg', 10)
+
         self.audio_output = AudioOutput()
         self.audio_output.start()
 
         self.tts = TTSConverter(self.get_logger(), self.audio_output)
+    
+        self.set_status_timer()
 
     def __del__(self):
         self.audio_output.stop()
+
+    def set_status_timer(self):
+        self.timer = Timer(0.5, self.report_status)
+        self.timer.start()
+
+    def publish_status(self, status, pub):
+        msg = String()
+        if status == AudioType.TTS:
+            msg.data = 'tts'
+        elif status == AudioType.File:
+            msg.data = 'file'
+        else:
+            msg.data = 'none'                
+        pub.publish(msg)
+
+    def report_status(self):
+        status = self.audio_output.get_audio_type()
+
+        self.publish_status(status["fg"], self.publisher_fg_status)
+        self.publish_status(status["bg"], self.publisher_bg_status)
+
+        # Legacy support for Head node
+        msg = Bool()
+        msg.data = status["fg"] == AudioType.TTS
+        self.publisher_head_speaking.publish(msg)
+
+        self.set_status_timer()
 
     def pause_service_callback(self, request, response):
         self.audio_output.pause()
@@ -62,7 +97,7 @@ class AudioOutputServerNode(Node):
         except Exception as ex:
             response.result = "file not found: " + request.audio_req.file_path + ", " + ex
 
-        self.audio_output.add_to_queue(stream_type, data, samplerate, request.req_id)
+        self.audio_output.add_to_queue(stream_type, data, samplerate, AudioType.File, request.req_id)
         response.result = "success"
 
         return response

@@ -4,26 +4,35 @@ import queue
 import threading
 import time
 
+from enum import Enum
+
+# class syntax
+class AudioType(Enum):
+    TTS = 1
+    File = 2
+
 class AudioQueue:
     def __init__(self):
         self.queue = queue.Queue()
         self.cur_item = None
+        self.cur_audio_type = None
         self.cur_req_id = None
         self.cur_item_offset = 0
 
         self.cancel_list = []
         self.cancel_list_lock = threading.Lock()
 
-    def put(self, data, req_id):
-        self.queue.put((data, req_id))
+    def put(self, data, audio_type, req_id):
+        self.queue.put((data, audio_type, req_id))
 
     def get(self, req_size):
         out_size = 0
         data = None
+        audio_type = None
         try:
             while(True):
                 if self.cur_item == None:
-                    self.cur_item, self.cur_req_id = self.queue.get_nowait()
+                    self.cur_item, self.cur_audio_type, self.cur_req_id = self.queue.get_nowait()
                     self.cur_item_offset = 0
 
                 if self.should_drop(self.cur_req_id):
@@ -39,11 +48,12 @@ class AudioQueue:
                 self.cur_item_offset += out_size
                 if len(self.cur_item) - self.cur_item_offset <= 0:
                     self.cur_item = None
+                audio_type = self.cur_audio_type
                 break
 
         except queue.Empty:
             pass
-        return out_size, data
+        return out_size, data, audio_type
 
     def should_drop(self, req_id):
         drop = False
@@ -77,13 +87,17 @@ class AudioOutput:
         self.p = pyaudio.PyAudio()
         self.stream = None
 
+        self.fg_audio_type = None
+        self.bg_audio_type = None
+
     def _get_chunk_from_queue(self, q, bytes_needed):
-        """Helper to pull and aggregate specific byte length from a queue."""
+
+        audio_type = None
         data = bytearray()
 
         needed = bytes_needed
         while len(data) < needed:
-            size, chunk = q.get(needed)
+            size, chunk, audio_type = q.get(needed)
 
             if size > 0:
                 data.extend(chunk)
@@ -95,7 +109,7 @@ class AudioOutput:
             # Fill remaining needed space with silence
             data.extend(b'\x00' * (bytes_needed - len(data)))
 
-        return bytes(data[:bytes_needed])
+        return (bytes(data[:bytes_needed]), audio_type)
 
     def _callback(self, in_data, frame_count, time_info, status):
         # Calculate bytes for: frames * 2 channels * 4 bytes (float32)
@@ -105,10 +119,12 @@ class AudioOutput:
         if self.paused:
             data = bytearray(bytes_needed)
             arr = np.frombuffer(data, dtype=np.float32)
+            self.fg_audio_type = None
+            self.bg_audio_type = None
             return (arr.tobytes(), pyaudio.paContinue)
         else:
-            raw_a = self._get_chunk_from_queue(self.queue_fg, bytes_needed)
-            raw_b = self._get_chunk_from_queue(self.queue_bg, bytes_needed)
+            raw_a, self.fg_audio_type = self._get_chunk_from_queue(self.queue_fg, bytes_needed)
+            raw_b, self.bg_audio_type = self._get_chunk_from_queue(self.queue_bg, bytes_needed)
 
         # Convert raw bytes back to numpy arrays for mixing
         arr_a = np.frombuffer(raw_a, dtype=np.float32)
@@ -120,7 +136,7 @@ class AudioOutput:
 
         return (mixed.tobytes(), pyaudio.paContinue)
 
-    def add_to_queue(self, q_name, audio_data, source_rate, req_id, source_channels=1):
+    def add_to_queue(self, q_name, audio_data, source_rate, audio_type, req_id, source_channels=1):
         target_q = self.queue_fg if q_name.lower() == 'fg' else self.queue_bg
         
         processed = np.array(audio_data, dtype=np.float32)
@@ -143,7 +159,7 @@ class AudioOutput:
             print("Reshape channels")
             processed = processed.reshape(-1, 2)
 
-        target_q.put(processed.tobytes(), req_id)
+        target_q.put(processed.tobytes(), audio_type, req_id)
 
     def cancel(self, req_id):
         self.queue_fg.cancel(req_id)
@@ -182,3 +198,6 @@ class AudioOutput:
 
     def resume(self):
         self.paused = False
+
+    def get_audio_type(self):
+        return {'fg': self.fg_audio_type, 'bg': self.bg_audio_type}
