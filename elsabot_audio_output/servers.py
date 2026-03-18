@@ -108,11 +108,11 @@ class AudioOutputServerNode(Node):
         try:
             data, samplerate = sf.read(request.audio_req.file_path)
         except Exception as ex:
-            response.result = "file not found: " + request.audio_req.file_path + ", " + ex
+            response.result = "file not found: " + request.audio_req.file_path + ", " + str(ex)
+            return response
 
         self.audio_output.add_to_queue(stream_type, data, samplerate, AudioType.File, request.req_id)
         response.result = "success"
-
         return response
 
 def main(args=None):
