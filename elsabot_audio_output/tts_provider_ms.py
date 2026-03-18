@@ -22,7 +22,24 @@ class TTSProviderMicrosoft(TTSProvider):
         self.speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
 
     def request_tts(self, text):
-        result = self.speech_synthesizer.speak_text_async(text).get()
+
+        voice = "en-US-JennyNeural"
+        style = "chat"
+        rate = "-15"
+        pitch = "21"
+        contour = "(0%, +0%) (100%, +0%)"
+
+        ssml = (f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">'
+                    f'<voice name="{voice}">'
+                        f'<mstts:express-as style="{style}">'
+                            f'<prosody rate="{rate}%" pitch="{pitch}%" contour="{contour}">'
+                                f'{text}'
+                            f'</prosody>'
+                        f'</mstts:express-as>'
+                    f'</voice>'
+                f'</speak>')
+
+        result = self.speech_synthesizer.speak_ssml_async(ssml).get()
 
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             audio_data = result.audio_data
