@@ -35,7 +35,7 @@ class TTSProvider:
         return None, None
 
     def convert(self, text, req_id):
-        self.logger.info(f'convert, text: {text}')
+        self.logger.debug(f'TTSProvider convert, text: {text}')
 
         audio = None
         if self.cache_enabled:
@@ -54,14 +54,14 @@ class TTSProvider:
             tts_io_buf = self.request_tts(text)
             if tts_io_buf is None:
                 return None, None
-            self.logger.info(f'convert, using converted text')
+            self.logger.debug(f'TTSProvider convert, using converted text')
             tts_io_buf.seek(0)
             audio, sample_rate = sf.read(tts_io_buf)
 
             if self.cache_enabled:
                 self.cache_put(text, audio, sample_rate)
         else:
-            self.logger.info(f'convert, using cached text')
+            self.logger.debug(f'TTSProvider convert, using cached text')
 
         return audio, sample_rate
 
