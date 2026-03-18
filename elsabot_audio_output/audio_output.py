@@ -3,13 +3,32 @@ import numpy as np
 import queue
 import threading
 import time
-
 from enum import Enum
 
 # class syntax
 class AudioType(Enum):
     TTS = 1
     File = 2
+
+class QueueItemType(Enum):
+    CancelMarker = 1
+    Data = 2
+
+class QueueItem:
+    def __init__(self, type):
+        self.type = type
+
+class QueueItemData:
+    def __init__(self, data, audio_type, req_id):
+        QueueItem.__init__(self, QueueItemType.Data)
+        self.data = data
+        self.audio_type = audio_type
+        self.req_id = req_id
+
+class QueueItemCancelMarker:
+    def __init__(self, marker_id):
+        QueueItem.__init__(self, QueueItemType.CancelMarker)
+        self.marker_id = marker_id
 
 class AudioQueue:
     def __init__(self):
@@ -21,9 +40,10 @@ class AudioQueue:
 
         self.cancel_list = []
         self.cancel_list_lock = threading.Lock()
+        self.cancel_marker_id = 0
 
     def put(self, data, audio_type, req_id):
-        self.queue.put((data, audio_type, req_id))
+        self.queue.put(QueueItemData(data, audio_type, req_id))
 
     def get(self, req_size):
         out_size = 0
@@ -32,7 +52,15 @@ class AudioQueue:
         try:
             while(True):
                 if self.cur_item == None:
-                    self.cur_item, self.cur_audio_type, self.cur_req_id = self.queue.get_nowait()
+                    item = self.queue.get_nowait()
+
+                    if item.type == QueueItemType.CancelMarker:
+                        self.retire_cancel_request(item.marker_id)
+                        continue
+
+                    self.cur_item = item.data
+                    self.cur_audio_type = item.audio_type
+                    self.cur_req_id = item.req_id
                     self.cur_item_offset = 0
 
                 if self.should_drop(self.cur_req_id):
@@ -57,20 +85,31 @@ class AudioQueue:
 
     def should_drop(self, req_id):
         drop = False
-        new_list = []
         with self.cancel_list_lock:
-            for id, remaining_cks in self.cancel_list:
-                if req_id == id:
+            for id, _ in self.cancel_list:
+                #print(f'checking cancel item: req_id: {req_id} id: {id}')
+                if id == "all" or req_id == id:
                     drop = True
-                    print(f"drop {req_id}  remaining {remaining_cks}")
-                if remaining_cks > 1:
-                    new_list.append((id, remaining_cks - 1))
-            self.cancel_list = new_list                    
+                    #print(f"dropping {req_id}")
+                    break
         return drop            
 
     def cancel(self, req_id):
+        # Do actual dropping during the read path.  Add id to the list of
+        # items to cancel.  Use a marker entry in the data queue to know
+        # when to retire this cancel request.
         with self.cancel_list_lock:
-            self.cancel_list.append((req_id, self.queue.qsize()))
+            self.cancel_marker_id += 1
+            self.cancel_list.append((req_id, self.cancel_marker_id))
+            self.queue.put(QueueItemCancelMarker(self.cancel_marker_id))            
+
+    def retire_cancel_request(self, marker_id_to_retire):
+        with self.cancel_list_lock:
+            new_list = []
+            for req_id, marker_id in self.cancel_list:
+                if marker_id != marker_id_to_retire:
+                    new_list.append((req_id, marker_id))
+            self.cancel_list = new_list
 
 class AudioOutput:
     def __init__(self, device_name=None, rate=44100):
@@ -91,7 +130,6 @@ class AudioOutput:
         self.bg_audio_type = None
 
     def _get_chunk_from_queue(self, q, bytes_needed):
-
         audio_type = None
         data = bytearray()
 
@@ -112,6 +150,15 @@ class AudioOutput:
         return (bytes(data[:bytes_needed]), audio_type)
 
     def _callback(self, in_data, frame_count, time_info, status):
+
+        if False:
+            if status & pyaudio.paOutputUnderflow:
+                print('underflow')
+            if status & pyaudio.paOutputOverflow:
+                print('overflow')
+            if status & pyaudio.paPrimingOutput:
+                print('priming')
+
         # Calculate bytes for: frames * 2 channels * 4 bytes (float32)
         bytes_needed = frame_count * self.channels * 4
         
@@ -143,7 +190,6 @@ class AudioOutput:
 
         # Resample
         if source_rate != self.rate:
-            print("Changing sample rate")
             num_samples = int(len(processed) * self.rate / source_rate)
             processed = np.interp(
                 np.linspace(0, len(processed), num_samples),
@@ -153,10 +199,8 @@ class AudioOutput:
 
         # Convert to Stereo
         if source_channels == 1:
-            print("Changing num channels")
             processed = np.column_stack((processed, processed))
         elif source_channels == 2 and processed.ndim == 1:
-            print("Reshape channels")
             processed = processed.reshape(-1, 2)
 
         target_q.put(processed.tobytes(), audio_type, req_id)
