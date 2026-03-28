@@ -192,11 +192,22 @@ class AudioOutput:
         # Resample
         if source_rate != self.rate:
             num_samples = int(len(processed) * self.rate / source_rate)
-            processed = np.interp(
-                np.linspace(0, len(processed), num_samples),
-                np.arange(len(processed)),
-                processed
-            ).astype(np.float32)
+
+            original_len = len(processed)
+
+            # 1. Define the 'old' and 'new' x-coordinates (indices)
+            # Use - 1 to ensure the new points fit exactly within the old range
+            old_indices = np.arange(original_len)
+            new_indices = np.linspace(0, original_len - 1, num_samples)
+
+            # 2. Apply interpolation across the first axis (rows)
+            # This processes each column independently
+            resampled = np.apply_along_axis(
+                lambda col: np.interp(new_indices, old_indices, col),
+                axis=0,
+                arr=processed
+            )
+            processed = resampled.astype(np.float32)
 
         # Convert to Stereo
         if source_channels == 1:
