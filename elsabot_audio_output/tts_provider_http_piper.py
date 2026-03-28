@@ -13,11 +13,11 @@ class TTSProviderHTTPPiper(TTSProvider):
         self.tts_timeout = os.getenv('TTS_PIPER_TIMEOUT', 10)
   
     def request_tts(self, text):
-        req_data = text
+        req_data = {"text": text}
 
         try:
             self.logger.debug(f"TTS Piper making request: {req_data}")
-            response = requests.post(self.tts_url, data=req_data, timeout=self.tts_timeout)
+            response = requests.post(self.tts_url, json=req_data, timeout=self.tts_timeout)
             self.logger.debug(f"TTS Piper response status: {response.status_code}, size {len(response.content)}")
             if response.status_code == 200:
                 tts_io_buf = io.BytesIO()
