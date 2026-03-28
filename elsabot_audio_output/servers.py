@@ -8,6 +8,8 @@ from .audio_output import AudioOutput, AudioType
 from .tts_converter import TTSConverter
 
 import os
+import io
+import base64
 import numpy as np
 import soundfile as sf
 from threading import Timer
@@ -105,13 +107,26 @@ class AudioOutputServerNode(Node):
         stream_type = "bg"
         if request.stream_type == StreamType.STREAM_TYPE_FG:
             stream_type = "fg"
-        try:
-            data, samplerate = sf.read(request.audio_req.file_path)
-        except Exception as ex:
-            response.result = "file not found: " + request.audio_req.file_path + ", " + str(ex)
-            return response
 
-        self.audio_output.add_to_queue(stream_type, data, samplerate, AudioType.File, request.req_id)
+        if len(request.audio_req.file_path) > 0:
+            try:
+                data, samplerate = sf.read(request.audio_req.file_path)
+
+            except Exception as ex:
+                response.result = "file not found: " + request.audio_req.file_path + ", " + str(ex)
+                return response
+        else:
+            try:
+                encoded_bytes_from_string = request.audio_req.base64_audio.encode('utf-8')
+                decoded_bytes = base64.b64decode(encoded_bytes_from_string, validate=True)
+                audio_file = io.BytesIO(decoded_bytes)
+                data, samplerate = sf.read(audio_file)
+
+            except Exception as ex:
+                response.result = "Invalid base64 audio, " + str(ex)
+                return response
+
+        self.audio_output.add_to_queue(stream_type, data, samplerate, AudioType.File, request.req_id, source_channels=data.ndim)
         response.result = "success"
         return response
 
