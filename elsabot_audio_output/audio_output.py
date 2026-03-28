@@ -163,14 +163,15 @@ class AudioOutput:
         # Calculate bytes for: frames * 2 channels * 4 bytes (float32)
         bytes_needed = frame_count * self.channels * 4
         
-        # Pull data from both queues
         if self.paused:
+            # Fix - ramp up/down on pause/resume transitions
             data = bytearray(bytes_needed)
             arr = np.frombuffer(data, dtype=np.float32)
             self.fg_audio_type = None
             self.bg_audio_type = None
             return (arr.tobytes(), pyaudio.paContinue)
         else:
+            # Pull data from both queues
             raw_a, self.fg_audio_type = self._get_chunk_from_queue(self.queue_fg, bytes_needed)
             raw_b, self.bg_audio_type = self._get_chunk_from_queue(self.queue_bg, bytes_needed)
 
@@ -226,12 +227,16 @@ class AudioOutput:
         info = self.p.get_default_output_device_info()
         print(f'def audio dev info: {info}')
 
+        self.device_name = "ReSpeaker"
         output_device_index = None
         if self.device_name is not None:
             for i in range(self.p.get_device_count()):
                 info = self.p.get_device_info_by_index(i)
+                print(f'audio dev info: {info}')
                 if self.device_name in info['name'] and info['maxOutputChannels'] > 0:
                     output_device_index = info['index']
+                    self.rate = int(info['defaultSampleRate'])
+                    print(f'Using device: {info['name']}')
                     break
 
         self.stream = self.p.open(
