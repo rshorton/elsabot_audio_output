@@ -91,6 +91,7 @@ class TTSConverter():
 
             # Blocks until an item is available in the queue
             item = self.queue.get()
+            self.queue.task_done()
             if item.type == QueueItemType.CancelMarker:
                 self.retire_cancel_request(item.marker_id)
                 continue

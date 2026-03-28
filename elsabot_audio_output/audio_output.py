@@ -53,6 +53,7 @@ class AudioQueue:
             while(True):
                 if self.cur_item == None:
                     item = self.queue.get_nowait()
+                    self.queue.task_done()
 
                     if item.type == QueueItemType.CancelMarker:
                         self.retire_cancel_request(item.marker_id)
