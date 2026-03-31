@@ -123,7 +123,8 @@ class AudioOutput:
         self.queue_fg = AudioQueue()
         self.queue_bg = AudioQueue()
         
-        self.paused = False
+        self.fg_paused = False
+        self.bg_paused = False
         self.p = pyaudio.PyAudio()
         self.stream = None
 
@@ -163,21 +164,25 @@ class AudioOutput:
         # Calculate bytes for: frames * 2 channels * 4 bytes (float32)
         bytes_needed = frame_count * self.channels * 4
         
-        if self.paused:
+        if self.fg_paused:
             # Fix - ramp up/down on pause/resume transitions
             data = bytearray(bytes_needed)
-            arr = np.frombuffer(data, dtype=np.float32)
+            arr_a = np.frombuffer(data, dtype=np.float32)
             self.fg_audio_type = None
-            self.bg_audio_type = None
-            return (arr.tobytes(), pyaudio.paContinue)
         else:
-            # Pull data from both queues
             raw_a, self.fg_audio_type = self._get_chunk_from_queue(self.queue_fg, bytes_needed)
-            raw_b, self.bg_audio_type = self._get_chunk_from_queue(self.queue_bg, bytes_needed)
+            # Convert raw bytes to numpy arrays for mixing
+            arr_a = np.frombuffer(raw_a, dtype=np.float32)
 
-        # Convert raw bytes back to numpy arrays for mixing
-        arr_a = np.frombuffer(raw_a, dtype=np.float32)
-        arr_b = np.frombuffer(raw_b, dtype=np.float32)
+        if self.bg_paused:
+            # Fix - ramp up/down on pause/resume transitions
+            data = bytearray(bytes_needed)
+            arr_b = np.frombuffer(data, dtype=np.float32)
+            self.bg_audio_type = None
+        else:
+            raw_b, self.bg_audio_type = self._get_chunk_from_queue(self.queue_bg, bytes_needed)
+            # Convert raw bytes to numpy arrays for mixing
+            arr_b = np.frombuffer(raw_b, dtype=np.float32)
 
         # Mix: Sum the signals. 
         # Note: 0.5 gain prevents clipping if both signals are at max volume.
@@ -254,11 +259,18 @@ class AudioOutput:
             self.stream.close()
         self.p.terminate()
 
-    def pause(self):
-        self.paused = True
+    def pause_fg(self):
+        self.fg_paused = True
 
-    def resume(self):
-        self.paused = False
+    def resume_fg(self):
+        self.fg_paused = False
+
+    def pause_bg(self):
+        self.bg_paused = True
+
+    def resume_bg(self):
+        self.bg_paused = False
 
     def get_audio_type(self):
-        return {'fg': self.fg_audio_type, 'bg': self.bg_audio_type}
+        return {'fg': {'type': self.fg_audio_type, 'paused': self.fg_paused},
+                'bg': {'type': self.bg_audio_type,        'paused': self.bg_paused}}

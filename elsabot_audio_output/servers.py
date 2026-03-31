@@ -79,12 +79,34 @@ class AudioOutputServerNode(Node):
         self.set_status_timer()
 
     def pause_service_callback(self, request, response):
-        self.audio_output.pause()
+        if request.stream_type.stream_type == StreamType.STREAM_TYPE_FG:
+            self.audio_output.pause_fg()
+            strm = 'fg'
+        elif request.stream_type.stream_type == StreamType.STREAM_TYPE_BG:
+            self.audio_output.pause_bg()
+            strm = 'bg'
+        else:
+            self.get_logger().error(f'Pause: invalid stream type {request.stream_type}')                
+            response.result = "failed"
+            return response
+
+        self.get_logger().info(f'Pause: {strm}')
         response.result = "success"
         return response
 
     def resume_service_callback(self, request, response):
-        self.audio_output.resume()
+        if request.stream_type.stream_type == StreamType.STREAM_TYPE_FG:
+            self.audio_output.resume_fg()
+            strm = 'fg'
+        elif request.stream_type.stream_type == StreamType.STREAM_TYPE_BG:
+            self.audio_output.resume_bg()
+            strm = 'bg'
+        else:
+            self.get_logger().error(f'Resume: invalid stream type {request.stream_type}')                
+            response.result = "failed"
+            return response
+
+        self.get_logger().info(f'Resume: {strm}')
         response.result = "success"
         return response
 
@@ -98,14 +120,16 @@ class AudioOutputServerNode(Node):
 
     def tts_service_callback(self, request, response):
         response.result = self.tts.convert(request.tts_req.text, request.req_id)
-        self.get_logger().info(f'TTS request: text={request.tts_req.text}, req_id={request.req_id}. Returning: {response.result}')
+        self.get_logger().info(f'TTS request: text={request.tts_req.text}, '\
+                               f'req_id={request.req_id}. Returning: {response.result}')
         return response
 
     def audio_service_callback(self, request, response):
-        self.get_logger().info(f'Incoming Audio request: file_path={request.audio_req.file_path}, stream_type={request.stream_type}, req_id={request.req_id}')
+        self.get_logger().info(f'Incoming Audio request: file_path={request.audio_req.file_path}, '\
+                               f'stream_type={request.stream_type.stream_type}, req_id={request.req_id}')
 
         stream_type = "bg"
-        if request.stream_type == StreamType.STREAM_TYPE_FG:
+        if request.stream_type.stream_type == StreamType.STREAM_TYPE_FG:
             stream_type = "fg"
 
         if len(request.audio_req.file_path) > 0:
@@ -126,7 +150,8 @@ class AudioOutputServerNode(Node):
                 response.result = "Invalid base64 audio, " + str(ex)
                 return response
 
-        self.audio_output.add_to_queue(stream_type, data, samplerate, AudioType.File, request.req_id, source_channels=data.ndim)
+        self.audio_output.add_to_queue(stream_type, data, samplerate, AudioType.File, request.req_id,
+                                       source_channels=data.ndim)
         response.result = "success"
         return response
 
