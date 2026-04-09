@@ -5,20 +5,20 @@ import requests
 
 from .tts_provider import TTSProvider
 
-class TTSProviderHTTPPiper(TTSProvider):
+class TTSProviderLocal(TTSProvider):
     def __init__(self, logger):
-        TTSProvider.__init__(self, logger, 'local_piper')
+        TTSProvider.__init__(self, logger, 'local')
       
-        self.tts_url = os.getenv('TTS_PIPER_URL', 'http://localhost:5000') 
-        self.tts_timeout = os.getenv('TTS_PIPER_TIMEOUT', 10)
+        self.tts_url = os.getenv('TTS_LOCAL_URL', 'http://localhost:5000') 
+        self.tts_timeout = os.getenv('TTS_LOCAL_TIMEOUT', 10)
   
     def request_tts(self, text):
         req_data = {"text": text}
 
         try:
-            self.logger.debug(f"TTS Piper making request: {req_data}")
+            self.logger.debug(f"TTS local making request: {req_data}")
             response = requests.post(self.tts_url, json=req_data, timeout=self.tts_timeout)
-            self.logger.debug(f"TTS Piper response status: {response.status_code}, size {len(response.content)}")
+            self.logger.debug(f"TTS local response status: {response.status_code}, size {len(response.content)}")
             if response.status_code == 200:
                 tts_io_buf = io.BytesIO()
                 tts_io_buf.name = 'tts.wav'
@@ -26,12 +26,12 @@ class TTSProviderHTTPPiper(TTSProvider):
                 return tts_io_buf
 
         except requests.exceptions.ConnectTimeout:
-            self.logger.error(f'TTS Piper conversion failed, connection timed out')
+            self.logger.error(f'TTS local conversion failed, connection timed out')
 
         except requests.exceptions.ReadTimeout:
-            self.logger.error(f'TTS Piper conversion failed, read timed out')
+            self.logger.error(f'TTS local conversion failed, read timed out')
 
         except Exception as e:
-            self.logger.error(f'TTS Piper conversion failed, ex: {e}')
+            self.logger.error(f'TTS local conversion failed, ex: {e}')
 
         return None
