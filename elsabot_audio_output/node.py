@@ -25,11 +25,11 @@ class ElsabotAudioOutput(Node):
         self.declare_parameter('audio_device_name', 'ReSpeaker')
         audio_device_name = self.get_parameter('audio_device_name').get_parameter_value().string_value
 
-        self.tts_srv = self.create_service(PlayTTS, 'play_tts_service', self.tts_service_callback)
-        self.audio_srv = self.create_service(PlayAudioFile, 'play_audio_service', self.audio_service_callback)
-        self.cancel_srv = self.create_service(CancelAudio, 'cancel_audio_service', self.cancel_service_callback)
-        self.pause_srv = self.create_service(PauseAudio, 'pause_audio_service', self.pause_service_callback)
-        self.resume_srv = self.create_service(ResumeAudio, 'resume_audio_service', self.resume_service_callback)
+        self.tts_srv = self.create_service(PlayTTS, 'play_tts', self.tts_service_callback)
+        self.audio_srv = self.create_service(PlayAudioFile, 'play_audio', self.audio_service_callback)
+        self.cancel_srv = self.create_service(CancelAudio, 'cancel_audio', self.cancel_service_callback)
+        self.pause_srv = self.create_service(PauseAudio, 'pause_audio', self.pause_service_callback)
+        self.resume_srv = self.create_service(ResumeAudio, 'resume_audio', self.resume_service_callback)
 
         self.publisher_head_speaking = self.create_publisher(Bool, '/head/speaking', 10)
         self.publisher_fg_status = self.create_publisher(String, '/audio_output/status/fg', 10)
@@ -170,7 +170,7 @@ class ElsabotAudioOutput(Node):
                 return response
 
         self.audio_output.add_to_queue(stream_type, data, samplerate, AudioType.File, request.req_id,
-                                       source_channels=data.ndim)
+                                       None, source_channels=data.ndim)
         response.result = "success"
         return response
 

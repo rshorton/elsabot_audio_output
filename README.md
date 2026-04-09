@@ -11,11 +11,11 @@ This package implements a ROS2 node that implements Elsabot-specific audio outpu
   * (Future) Head movements
 
 These services are implemented by this node:
-* play_tts_service - used to convert and play TTS text
-* play_audio_service - used to play an audio file (from file or specified base64 data)
-* cancel_audio_service - used to cancel TTS or audio playback.  A specific TTS/audio playback can be cancelled or all playing/queued.
-* pause_audio_service - used to pause TTS or audio playback
-* resume_audio_service - used to resume TTS or audio playback
+* play_tts - used to convert and play TTS text
+* play_audio - used to play an audio file (from file or specified base64 data)
+* cancel_audio - used to cancel TTS or audio playback.  A specific TTS/audio playback can be cancelled or all playing/queued.
+* pause_audio - used to pause TTS or audio playback
+* resume_audio - used to resume TTS or audio playback
 
 The following can be specified when issuing a request to play TTS or audio:
 * Output stream - foreground/background
@@ -45,3 +45,25 @@ For local TTS, the current implementation of this node expects a Piper TTS serve
 The current implementation of the local TTS processor is implemented using a Docker container (for Nvidia Jetson) that hosts the Piper TTS package.  See the jetson_support repo for the docker file and script run_stt_tts.py used to start that container.  You can specify the input device and host/port via arguments.
           
 
+## Test commands:
+
+**Convert text to speech and translate emoji into face smiling action**
+
+ros2 service call /play_tts elsabot_audio_output_interfaces/PlayTTS "{ tts_req: { text: \"This is a test for testing emoji-to-action processing of TTS.  Here is a big smile 😄 and here is a normal smile 🙂 and here is a small smile 🫡 and here is no smile 🤐 and that is all I have to say about that\" }, req_id: \"5\" }"
+
+**Foreground audio playback (default)**
+
+ros2 service call /play_audio elsabot_audio_output_interfaces/srv/PlayAudioFile "{ audio_req  : { file_path: \"/robot_ws/test.wav\" },  req_id: \"5\" }"
+
+**Background audio playback**
+
+ros2 service call /play_audio elsabot_audio_output_interfaces/srv/PlayAudioFile "{ audio_req  : { file_path: \"/robot_ws/test2.wav\" }, stream_type: { stream_type: 1 }, req_id: \"5\" }"
+
+**Cancel playback**
+
+ros2 service call /cancel_audio elsabot_audio_output_interfaces/srv/CancelAudio "{ req_id: \"5\"  }"
+
+**Pause/resume playback**
+
+ros2 service call /pause_audio elsabot_audio_output_interfaces/srv/PauseAudio "{   }"
+ros2 service call /resume_audio elsabot_audio_output_interfaces/srv/ResumeAudio "{   }"

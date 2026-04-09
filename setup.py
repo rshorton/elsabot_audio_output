@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'elsabot_audio_output = elsabot_audio_output.servers:main',
+            'elsabot_audio_output = elsabot_audio_output.node:main',
         ],
     },
 )
