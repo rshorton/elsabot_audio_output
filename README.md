@@ -42,6 +42,6 @@ For local TTS, the current implementation of this node expects a Piper TTS serve
 {"text": "the text to convert to speech"}
 ```
 
-The current implementation of the local TTS processor is implemented using a Docker container (for Nvidia Jetson) that hosts the Piper TTS package.  See the jetson_support repo for the docker file and script (run_stt_tts.py) used to start that container.
+The current implementation of the local TTS processor is implemented using a Docker container (for Nvidia Jetson) that hosts the Piper TTS package.  See the jetson_support repo for the docker file and script run_stt_tts.py used to start that container.  You can specify the input device and host/port via arguments.
           
 
