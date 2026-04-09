@@ -5,10 +5,10 @@ import threading
 import time
 from enum import Enum
 
-# class syntax
 class AudioType(Enum):
     TTS = 1
     File = 2
+    Silence = 3
 
 class QueueItemType(Enum):
     CancelMarker = 1
@@ -19,11 +19,12 @@ class QueueItem:
         self.type = type
 
 class QueueItemData:
-    def __init__(self, data, audio_type, req_id):
+    def __init__(self, data, audio_type, req_id, action):
         QueueItem.__init__(self, QueueItemType.Data)
         self.data = data
         self.audio_type = audio_type
         self.req_id = req_id
+        self.action = action
 
 class QueueItemCancelMarker:
     def __init__(self, marker_id):
@@ -42,13 +43,15 @@ class AudioQueue:
         self.cancel_list_lock = threading.Lock()
         self.cancel_marker_id = 0
 
-    def put(self, data, audio_type, req_id):
-        self.queue.put(QueueItemData(data, audio_type, req_id))
+    def put(self, data, audio_type, req_id, action):
+        self.queue.put(QueueItemData(data, audio_type, req_id, action))
 
     def get(self, req_size):
         out_size = 0
         data = None
         audio_type = None
+        actions = []
+
         try:
             while(True):
                 if self.cur_item == None:
@@ -63,6 +66,8 @@ class AudioQueue:
                     self.cur_audio_type = item.audio_type
                     self.cur_req_id = item.req_id
                     self.cur_item_offset = 0
+                    if item.action != None:
+                        actions.append(item.action)
 
                 if self.should_drop(self.cur_req_id):
                     # Probably should decay last sample to zero here to avoid a pop
@@ -82,7 +87,7 @@ class AudioQueue:
 
         except queue.Empty:
             pass
-        return out_size, data, audio_type
+        return out_size, data, audio_type, actions
 
     def should_drop(self, req_id):
         drop = False
@@ -113,7 +118,10 @@ class AudioQueue:
             self.cancel_list = new_list
 
 class AudioOutput:
-    def __init__(self, device_name=None, rate=44100):
+    def __init__(self, logger, action_cb, device_name, rate=44100):
+        self.logger = logger
+        self.action_cb = action_cb
+
         self.device_name = device_name
         self.rate = rate
         self.channels = 2
@@ -135,9 +143,14 @@ class AudioOutput:
         audio_type = None
         data = bytearray()
 
+        all_actions = []
+
         needed = bytes_needed
         while len(data) < needed:
-            size, chunk, audio_type = q.get(needed)
+            size, chunk, audio_type, actions = q.get(needed)
+
+            if len(actions) > 0:
+                all_actions.extend(actions)
 
             if size > 0:
                 data.extend(chunk)
@@ -149,7 +162,7 @@ class AudioOutput:
             # Fill remaining needed space with silence
             data.extend(b'\x00' * (bytes_needed - len(data)))
 
-        return (bytes(data[:bytes_needed]), audio_type)
+        return (bytes(data[:bytes_needed]), audio_type, all_actions)
 
     def _callback(self, in_data, frame_count, time_info, status):
 
@@ -170,9 +183,12 @@ class AudioOutput:
             arr_a = np.frombuffer(data, dtype=np.float32)
             self.fg_audio_type = None
         else:
-            raw_a, self.fg_audio_type = self._get_chunk_from_queue(self.queue_fg, bytes_needed)
+            raw_a, self.fg_audio_type, actions = self._get_chunk_from_queue(self.queue_fg, bytes_needed)
             # Convert raw bytes to numpy arrays for mixing
             arr_a = np.frombuffer(raw_a, dtype=np.float32)
+
+            for action in actions:
+                self.action_cb(action)
 
         if self.bg_paused:
             # Fix - ramp up/down on pause/resume transitions
@@ -180,7 +196,7 @@ class AudioOutput:
             arr_b = np.frombuffer(data, dtype=np.float32)
             self.bg_audio_type = None
         else:
-            raw_b, self.bg_audio_type = self._get_chunk_from_queue(self.queue_bg, bytes_needed)
+            raw_b, self.bg_audio_type, _ = self._get_chunk_from_queue(self.queue_bg, bytes_needed)
             # Convert raw bytes to numpy arrays for mixing
             arr_b = np.frombuffer(raw_b, dtype=np.float32)
 
@@ -190,7 +206,8 @@ class AudioOutput:
 
         return (mixed.tobytes(), pyaudio.paContinue)
 
-    def add_to_queue(self, q_name, audio_data, source_rate, audio_type, req_id, source_channels=1):
+    def add_to_queue(self, q_name, audio_data, source_rate, audio_type, req_id,
+                     action, source_channels=1):
         target_q = self.queue_fg if q_name.lower() == 'fg' else self.queue_bg
         
         processed = np.array(audio_data, dtype=np.float32)
@@ -221,27 +238,33 @@ class AudioOutput:
         elif source_channels == 2 and processed.ndim == 1:
             processed = processed.reshape(-1, 2)
 
-        target_q.put(processed.tobytes(), audio_type, req_id)
+        target_q.put(processed.tobytes(), audio_type, req_id, action)
+
+    def add_silence_to_queue(self, q_name, audio_type, duration, req_id, action, source_channels=1):
+        target_q = self.queue_fg if q_name.lower() == 'fg' else self.queue_bg
+
+        data = bytearray(int(float(duration)/1000*self.rate*6))
+        target_q.put(data, AudioType.Silence, req_id, action)
+
 
     def cancel(self, req_id):
         self.queue_fg.cancel(req_id)
         self.queue_bg.cancel(req_id)
 
     def start(self):
-
         info = self.p.get_default_output_device_info()
-        print(f'def audio dev info: {info}')
+        self.logger.info(f'Opening audio output using device name: {self.device_name}')
+        self.logger.info(f'Audio device info: {info}')
 
-        self.device_name = "ReSpeaker"
         output_device_index = None
         if self.device_name is not None:
             for i in range(self.p.get_device_count()):
                 info = self.p.get_device_info_by_index(i)
-                print(f'audio dev info: {info}')
+                self.logger.info(f'audio dev info: {info}')
                 if self.device_name in info['name'] and info['maxOutputChannels'] > 0:
                     output_device_index = info['index']
                     self.rate = int(info['defaultSampleRate'])
-                    print(f'Using device: {info['name']}')
+                    self.logger.info(f'Using device: {info['name']}')
                     break
 
         self.stream = self.p.open(
@@ -273,4 +296,4 @@ class AudioOutput:
 
     def get_audio_type(self):
         return {'fg': {'type': self.fg_audio_type, 'paused': self.fg_paused},
-                'bg': {'type': self.bg_audio_type,        'paused': self.bg_paused}}
+                'bg': {'type': self.bg_audio_type, 'paused': self.bg_paused}}

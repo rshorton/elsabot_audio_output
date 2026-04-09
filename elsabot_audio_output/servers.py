@@ -1,22 +1,29 @@
 import rclpy
 from rclpy.node import Node
+
 from elsabot_audio_output_interfaces.srv import PlayTTS, PlayAudioFile, CancelAudio, PauseAudio, ResumeAudio
 from elsabot_audio_output_interfaces.msg import StreamType
 from std_msgs.msg import Bool, String
 
 from .audio_output import AudioOutput, AudioType
+from .actions import create_action_executors
+
 from .tts_converter import TTSConverter
 
 import os
 import io
 import base64
+from queue import Queue, Empty
 import numpy as np
 import soundfile as sf
 from threading import Timer
 
-class AudioOutputServerNode(Node):
+class ElsabotAudioOutput(Node):
     def __init__(self):
-        super().__init__('audio_output_server_node')
+        super().__init__('elsabot_audio_output')
+
+        self.declare_parameter('audio_device_name', 'ReSpeaker')
+        audio_device_name = self.get_parameter('audio_device_name').get_parameter_value().string_value
 
         self.tts_srv = self.create_service(PlayTTS, 'play_tts_service', self.tts_service_callback)
         self.audio_srv = self.create_service(PlayAudioFile, 'play_audio_service', self.audio_service_callback)
@@ -29,18 +36,20 @@ class AudioOutputServerNode(Node):
         self.publisher_bg_status = self.create_publisher(String, '/audio_output/status/bg', 10)
         self.publisher_tts_status = self.create_publisher(String, '/audio_output/status/tts', 10)
 
-        self.audio_output = AudioOutput()
+        self.audio_output = AudioOutput(self.get_logger(), self.action_cb, audio_device_name)
         self.audio_output.start()
 
+        self.action_executors = create_action_executors(self.get_logger(), self)
+
         self.tts = TTSConverter(self.get_logger(), self.audio_output)
-    
+
         self.set_status_timer()
 
     def __del__(self):
         self.audio_output.stop()
 
     def set_status_timer(self):
-        self.timer = Timer(0.5, self.report_status)
+        self.timer = Timer(0.1, self.report_status)
         self.timer.start()
 
     def publish_channel_status(self, status, pub):
@@ -73,10 +82,20 @@ class AudioOutputServerNode(Node):
 
         # Legacy support for Head node
         msg = Bool()
-        msg.data = status["fg"] == AudioType.TTS
+        msg.data = status["fg"]["type"] == AudioType.TTS
         self.publisher_head_speaking.publish(msg)
 
+        # Fix - trigger calling these by an event instead of timer based
+        for _, executor in self.action_executors.items():
+            executor.complete_pending()
+
         self.set_status_timer()
+
+    def action_cb(self, action):
+        if action is None:
+            return
+        # This should queue up the processing to avoid holding up the calling thread
+        self.action_executors[action.get_action_category()].pre_process(action)
 
     def pause_service_callback(self, request, response):
         if request.stream_type.stream_type == StreamType.STREAM_TYPE_FG:
@@ -157,7 +176,7 @@ class AudioOutputServerNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    server_node = AudioOutputServerNode()
+    server_node = ElsabotAudioOutput()
 
     rclpy.spin(server_node)
     server_node.destroy_node()

@@ -1,14 +1,18 @@
 import threading
-import queue
+import queue 
 import requests
 from enum import Enum
+import regex
+import emoji
 
 from .audio_output import AudioType
 from .tts_provider_factory import create_tts_provider
+from .actions import create_actions_from_emoji
 
 class QueueItemType(Enum):
     CancelMarker = 1
     TTSReq = 2
+    Action = 3
 
 class QueueItem:
     def __init__(self, type):
@@ -24,6 +28,12 @@ class QueueItemCancelMarker:
     def __init__(self, marker_id):
         QueueItem.__init__(self, QueueItemType.CancelMarker)
         self.marker_id = marker_id
+
+class QueueItemAction:
+    def __init__(self, action, req_id):
+        QueueItem.__init__(self, QueueItemType.Action)
+        self.action = action
+        self.req_id = req_id
 
 class TTSConverter():
     def __init__(self, logger, audio_output):
@@ -50,8 +60,39 @@ class TTSConverter():
         self.run = False
         self.worker_thread.join()
 
+    # Translate emojis into robot face/head actions for conveying emotion
+    def split_and_interpret_emojis(self, input_text, req_id):
+        # \X matches a "Unicode grapheme cluster" (e.g., a complex emoji)
+        # This keeps emojis with modifiers (like 👨‍👩‍👧‍👦) together.
+        tokens = regex.findall(r'\X', input_text)
+
+        current_text = ""
+        
+        for token in tokens:
+            if emoji.is_emoji(token):
+                actions = create_actions_from_emoji(token)
+                if len(actions) > 0:
+                    # If we have accumulated text prior to this emoji, then push it to the queue before
+                    # the action (ignore whitespace in the text)
+                    if current_text.strip():
+                        self.logger.debug(f"text before emoji: {current_text}")
+                        self.queue.put(QueueItemTTSReq(current_text, req_id))
+                        current_text = ""
+
+                    for action in actions:
+                        self.queue.put(QueueItemAction(action, req_id))
+            else:
+                current_text += token
+                
+        # Add any remaining text at the end (ignore whitespace)
+        if current_text.strip():
+            self.logger.debug(f"remaining: {current_text}")
+            self.queue.put(QueueItemTTSReq(current_text, req_id))
+
     def convert(self, text, req_id):
-        self.queue.put(QueueItemTTSReq(text, req_id))
+        self.logger.info(f"convert: {text}")
+        self.split_and_interpret_emojis(text, req_id)
+        #self.queue.put(QueueItemTTSReq(text, req_id))
         return "queued"
 
     def cancel(self, req_id):
@@ -96,22 +137,30 @@ class TTSConverter():
                 self.retire_cancel_request(item.marker_id)
                 continue
 
+            elif item.type == QueueItemType.Action:
+                # Add action and associate with a period of silence (can be very short)
+                self.audio_output.add_silence_to_queue('fg', AudioType.TTS, item.action.get_silence_duration(), req_id, item.action)
+                self.logger.debug(f'TTSConverter added action to playback queue, req_id={req_id}')
+                continue
+            
+            self.logger.debug(f"worker next job: type: {item.type}, text: {item.text}")                
+
             text = item.text
             req_id = item.req_id
             self.processing = True
 
             if self.should_drop(req_id):
-                self.logger.debug(f'TTSConverter dropped, req_id={req_id}')
+                self.logger.info(f'TTSConverter dropped, req_id={req_id}')
                 continue
           
             audio, sample_rate = self.tts_provider.convert(text, req_id)
             if audio is None:
-                self.logger.error(f'TTSConverter failed, req_id={req_id}')
+                self.logger.error(f'TTSConverter failed, text= {text}, req_id={req_id}')
             else:
                 self.logger.debug(f'TTSConverter completed, req_id={req_id}')
                 if self.should_drop(req_id):
                     self.logger.debug(f'TTSConverter canceled, req_id={req_id}')
                     continue
 
-                self.audio_output.add_to_queue('fg', audio, sample_rate, AudioType.TTS, req_id)
+                self.audio_output.add_to_queue('fg', audio, sample_rate, AudioType.TTS, req_id, None)
                 self.logger.debug(f'TTSConverter added to playback queue, req_id={req_id}')
