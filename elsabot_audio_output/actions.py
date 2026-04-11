@@ -62,8 +62,8 @@ def create_actions_from_emoji(emoji):
 
     actions = []
 
-    silence_duration = 3000
-    action_duration = 2000
+    silence_duration = 2000
+    action_duration = 1500
 
     if emoji in big_smile_if_emoji:
         actions.append(SmileAction(SmileActionType.BigSmile, silence_duration, action_duration))
