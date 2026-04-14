@@ -7,7 +7,7 @@ import emoji
 
 from .audio_output import AudioType
 from .tts_provider_factory import create_tts_provider
-from .actions import create_actions_from_emoji
+from .actions import create_actions_from_emoji, create_random_head_movement_action
 
 class QueueItemType(Enum):
     CancelMarker = 1
@@ -66,7 +66,9 @@ class TTSConverter():
         # This keeps emojis with modifiers (like 👨‍👩‍👧‍👦) together.
         tokens = regex.findall(r'\X', input_text)
 
+        punctuation_list = '?.,!'
         current_text = ""
+        ch_cnt = 0
         
         for token in tokens:
             if emoji.is_emoji(token):
@@ -82,6 +84,13 @@ class TTSConverter():
                     for action in actions:
                         self.queue.put(QueueItemAction(action, req_id))
             else:
+                ch_cnt += 1
+                if token in punctuation_list or ch_cnt >= 50:
+                    action = create_random_head_movement_action()
+                    print(f"req_id {req_id}")
+                    self.queue.put(QueueItemAction(action, req_id))
+                    ch_cnt = 0
+
                 current_text += token
                 
         # Add any remaining text at the end (ignore whitespace)
@@ -92,7 +101,6 @@ class TTSConverter():
     def convert(self, text, req_id):
         self.logger.info(f"convert: {text}")
         self.split_and_interpret_emojis(text, req_id)
-        #self.queue.put(QueueItemTTSReq(text, req_id))
         return "queued"
 
     def cancel(self, req_id):
@@ -132,6 +140,7 @@ class TTSConverter():
 
             # Blocks until an item is available in the queue
             item = self.queue.get()
+            
             self.queue.task_done()
             if item.type == QueueItemType.CancelMarker:
                 self.retire_cancel_request(item.marker_id)
@@ -139,14 +148,15 @@ class TTSConverter():
 
             elif item.type == QueueItemType.Action:
                 # Add action and associate with a period of silence (can be very short)
-                self.audio_output.add_silence_to_queue('fg', AudioType.TTS, item.action.get_silence_duration(), req_id, item.action)
-                self.logger.debug(f'TTSConverter added action to playback queue, req_id={req_id}')
+                self.audio_output.add_silence_to_queue('fg', AudioType.TTS, item.action.get_silence_duration(), item.req_id, item.action)
+                self.logger.debug(f'TTSConverter added action to playback queue, req_id={item.req_id}')
                 continue
             
             self.logger.debug(f"worker next job: type: {item.type}, text: {item.text}")                
 
             text = item.text
             req_id = item.req_id
+
             self.processing = True
 
             if self.should_drop(req_id):
