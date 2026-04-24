@@ -54,9 +54,9 @@ class ElsabotAudioOutput(Node):
 
     def publish_channel_status(self, status, pub):
         msg = String()
-        if status == AudioType.TTS:
+        if status["type"] == AudioType.TTS:
             msg.data = 'tts'
-        elif status == AudioType.File:
+        elif status["type"] == AudioType.File:
             msg.data = 'file'
         else:
             msg.data = 'none'                
@@ -64,8 +64,8 @@ class ElsabotAudioOutput(Node):
 
     def publish_tts_status(self, status):
         msg = String()
-        if status["fg"] == AudioType.TTS or \
-           status["bg"] == AudioType.TTS or \
+        if status["fg"]["type"] == AudioType.TTS or \
+           status["bg"]["type"] == AudioType.TTS or \
            self.tts.is_processing():
             msg.data = "active"
         else:
