@@ -10,7 +10,7 @@ class TTSProviderLocal(TTSProvider):
         TTSProvider.__init__(self, logger, 'local')
       
         self.tts_url = os.getenv('TTS_LOCAL_URL', 'http://localhost:5000') 
-        self.tts_timeout = os.getenv('TTS_LOCAL_TIMEOUT', 10)
+        self.tts_timeout = os.getenv('TTS_LOCAL_TIMEOUT', 30)
   
     def request_tts(self, text):
         req_data = {"text": text}
