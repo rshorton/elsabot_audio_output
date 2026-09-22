@@ -267,6 +267,9 @@ class AudioOutput:
                     self.logger.info(f'Using device: {info['name']}')
                     break
 
+        if output_device_index is None:
+            self.logger.info(f'Failed to find requested device {self.device_name}')
+
         self.stream = self.p.open(
             format=self.format,
             channels=self.channels,
