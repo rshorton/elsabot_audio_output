@@ -254,14 +254,16 @@ class AudioOutput:
     def start(self):
         info = self.p.get_default_output_device_info()
         self.logger.info(f'Opening audio output using device name: {self.device_name}')
-        self.logger.info(f'Audio device info: {info}')
+        self.logger.info(f'Default audio device info: {info}')
 
         output_device_index = None
         if self.device_name is not None:
+            device_name = self.device_name.lower()
+
             for i in range(self.p.get_device_count()):
                 info = self.p.get_device_info_by_index(i)
                 self.logger.info(f'audio dev info: {info}')
-                if self.device_name in info['name'] and info['maxOutputChannels'] > 0:
+                if device_name in info['name'].lower() and info['maxOutputChannels'] > 0:
                     output_device_index = info['index']
                     self.rate = int(info['defaultSampleRate'])
                     self.logger.info(f'Using device: {info['name']}')
